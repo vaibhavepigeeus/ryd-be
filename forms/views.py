@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 
 from .models import FormForm, FormPage, FormPageSubmission, FormQuestion, FormSubsection, FormType
 from .questionnaire import build_questionnaire_detail
+from .question_versioning import create_question_version
 from .serializers import (
     FormFormSerializer,
     FormPageSerializer,
@@ -45,6 +46,26 @@ class FormQuestionListCreateView(generics.ListCreateAPIView):
 class FormQuestionDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = FormQuestion.objects.all()
     serializer_class = FormQuestionSerializer
+
+
+class FormQuestionNewVersionView(APIView):
+    """Create a new form_questions row (version + 1, new question_id) from an existing question."""
+
+    def post(self, request, pk):
+        source = get_object_or_404(FormQuestion, pk=pk)
+        question_text = request.data.get("question")
+
+        if question_text is None or str(question_text).strip() == "":
+            return Response(
+                {"detail": "question text is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_question = create_question_version(source, str(question_text).strip())
+        return Response(
+            FormQuestionSerializer(new_question).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class FormFormListCreateView(generics.ListCreateAPIView):

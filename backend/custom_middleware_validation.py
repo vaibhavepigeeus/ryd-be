@@ -91,7 +91,11 @@ class SpecialCharacterMiddleware(MiddlewareMixin):
         """
         Process incoming requests to validate and block those with special characters.
         """
-        if request.path.startswith("/admin") or request.path.startswith("/static/"):
+        if (
+            request.path.startswith("/admin")
+            or request.path.startswith("/static/")
+            or request.path.startswith("/api/forms/")
+        ):
             return None
 
         # Check GET parameters
@@ -217,7 +221,11 @@ class CustomMiddleware(MiddlewareMixin):
 
     def process_request(self, request):
         """Validate request data against SQL injection patterns."""
-        if request.path.startswith("/admin") or request.path.startswith("/static/"):
+        if (
+            request.path.startswith("/admin")
+            or request.path.startswith("/static/")
+            or request.path.startswith("/api/forms/")
+        ):
             return None
 
         print(f"API endpoint: {request.path}")

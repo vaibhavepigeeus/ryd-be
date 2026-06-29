@@ -10,6 +10,11 @@ urlpatterns = [
     path("subsections/<int:pk>/", views.FormSubsectionDetailView.as_view(), name="form_subsection_detail"),
     path("questions/", views.FormQuestionListCreateView.as_view(), name="form_question_list"),
     path("questions/<int:pk>/", views.FormQuestionDetailView.as_view(), name="form_question_detail"),
+    path(
+        "questions/<int:pk>/new-version/",
+        views.FormQuestionNewVersionView.as_view(),
+        name="form_question_new_version",
+    ),
     path("forms/", views.FormFormListCreateView.as_view(), name="form_form_list"),
     path("forms/<int:pk>/", views.FormFormDetailView.as_view(), name="form_form_detail"),
     path("pages/", views.FormPageListCreateView.as_view(), name="form_page_list"),
