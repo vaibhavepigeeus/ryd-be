@@ -26,22 +26,43 @@ class DocumentsViewSet(viewsets.ModelViewSet, CountModelMixin):
     serializer_class = DocumentsSerializer
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
-    def _presign_document_file(self, data):
+    def _resolve_document_file(self, data, request=None):
         doc_files = data.get("document_file")
-        if doc_files:
+        if not doc_files:
+            return data
+
+        doc_file = str(doc_files)
+        use_s3 = config("USE_S3", default=False, cast=bool)
+
+        if use_s3 and doc_file.startswith("http"):
             bucket = config("AWS_STORAGE_BUCKET_NAME", default="")
-            bucket_key = str(doc_files).replace(f"https://{bucket}.s3.amazonaws.com/", "")
-            data["document_file"] = create_presigned_url(bucket, bucket_key)
+            bucket_key = doc_file.replace(f"https://{bucket}.s3.amazonaws.com/", "")
+            data["document_file"] = create_presigned_url(bucket, bucket_key) or doc_file
+        elif request is not None:
+            if doc_file.startswith("http"):
+                data["document_file"] = doc_file
+            elif doc_file.startswith("/"):
+                data["document_file"] = request.build_absolute_uri(doc_file)
+            else:
+                from django.conf import settings as django_settings
+
+                data["document_file"] = request.build_absolute_uri(
+                    django_settings.MEDIA_URL + doc_file
+                )
+
         return data
+
+    def _presign_document_file(self, data, request=None):
+        return self._resolve_document_file(data, request)
 
     def list(self, request):
         serializer = DocumentsSerializer(Documents.objects.all(), many=True)
-        data = [self._presign_document_file(item) for item in serializer.data]
+        data = [self._presign_document_file(item, request) for item in serializer.data]
         return Response(data)
 
     def retrieve(self, request, pk=None):
         doc = Documents.objects.get(id=pk)
-        data = self._presign_document_file(DocumentsSerializer(doc).data)
+        data = self._presign_document_file(DocumentsSerializer(doc).data, request)
         return Response(data)
 
     def create(self, request, *args, **kwargs):
@@ -55,7 +76,10 @@ class DocumentsViewSet(viewsets.ModelViewSet, CountModelMixin):
         if data.get("document_file"):
             new_doc.document_file = data["document_file"]
             new_doc.save()
-        response_data = self._presign_document_file(DocumentsSerializer(new_doc).data)
+        response_data = self._presign_document_file(
+            DocumentsSerializer(new_doc).data,
+            request,
+        )
         return Response(response_data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
@@ -67,7 +91,7 @@ class DocumentsViewSet(viewsets.ModelViewSet, CountModelMixin):
         doc_object.document_file = data.get("document_file", doc_object.document_file)
         doc_object.document_type = data["document_type"]
         doc_object.save()
-        return Response(self._presign_document_file(DocumentsSerializer(doc_object).data))
+        return Response(self._presign_document_file(DocumentsSerializer(doc_object).data, request))
 
     def partial_update(self, request, *args, **kwargs):
         doc_object = self.get_object()
@@ -76,7 +100,7 @@ class DocumentsViewSet(viewsets.ModelViewSet, CountModelMixin):
             if field in data:
                 setattr(doc_object, field, data[field])
         doc_object.save()
-        return Response(self._presign_document_file(DocumentsSerializer(doc_object).data))
+        return Response(self._presign_document_file(DocumentsSerializer(doc_object).data, request))
 
     def destroy(self, request, *args, **kwargs):
         self.get_object().delete()

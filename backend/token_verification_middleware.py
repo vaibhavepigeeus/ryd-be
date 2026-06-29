@@ -32,6 +32,7 @@ class TokenVerificationMiddleware:
         self.routes_to_exclude = [
             "/admin",
             "/static/",
+            "/media/",
             "/api/users/login",
             "/api/users/forgot-password/",
             "/api/users/token/refresh/",
@@ -58,12 +59,12 @@ class TokenVerificationMiddleware:
             # If it does, skip token authentication and proceed with the request
             return self.get_response(request)
 
-        # Allow read-only access to form definitions in local development
-        if (
-            settings.DEBUG
-            and request.method == "GET"
-            and request.path.startswith("/api/forms/")
-        ):
+        # Allow form builder API access in local development
+        if settings.DEBUG and request.path.startswith("/api/forms/"):
+            return self.get_response(request)
+
+        # Allow document uploads for the form builder in local development
+        if settings.DEBUG and request.path.startswith("/api/documents/"):
             return self.get_response(request)
 
         # Extract the token

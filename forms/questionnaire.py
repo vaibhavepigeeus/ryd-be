@@ -16,10 +16,6 @@ def _frequency_subtitle(frequency):
     return f'RYD {label} Tool'
 
 
-def _question_sort_key(form_type, question, sequence_map):
-    return sequence_map.get(question.id, question.id)
-
-
 def build_questionnaire_list_item(form_type):
     return {
         'id': str(form_type.id),
@@ -36,11 +32,7 @@ def build_questionnaire_detail(form_type):
     subsections = list(
         FormSubsection.objects.filter(form_type=form_type, version=version).order_by('id')
     )
-    questions = list(
-        FormQuestion.objects.filter(form_type=form_type, version=version)
-    )
-
-    sequence_map = {
+    form_form_sequence = {
         item.question_id: item.sequence_no
         for item in FormForm.objects.filter(
             form_type=form_type,
@@ -48,6 +40,12 @@ def build_questionnaire_detail(form_type):
             question__isnull=False,
         )
     }
+
+    questions = list(
+        FormQuestion.objects.filter(form_type=form_type, version=version).order_by(
+            "sequence_no", "id"
+        )
+    )
 
     subsection_sections = {
         subsection.id: {
@@ -67,6 +65,9 @@ def build_questionnaire_detail(form_type):
             'label': _clean_html(question.question),
             'type': question.answer_type,
             'required': True,
+            'sequenceNo': form_form_sequence.get(
+                question.id, question.sequence_no
+            ),
         }
 
         if question.association_subsection_id in subsection_sections:
@@ -81,18 +82,8 @@ def build_questionnaire_detail(form_type):
                 sections.insert(0, general_section)
             general_section['fields'].append(field)
 
-    question_id_to_db_id = {
-        (question.question_id or str(question.id)): question.id
-        for question in questions
-    }
-
     for section in sections:
-        section['fields'].sort(
-            key=lambda field: sequence_map.get(
-                question_id_to_db_id.get(field['id'], 0),
-                9999,
-            )
-        )
+        section['fields'].sort(key=lambda field: field['sequenceNo'])
 
     sections = [section for section in sections if section['title'] or section['fields']]
 

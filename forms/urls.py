@@ -12,4 +12,13 @@ urlpatterns = [
     path("questions/<int:pk>/", views.FormQuestionDetailView.as_view(), name="form_question_detail"),
     path("forms/", views.FormFormListCreateView.as_view(), name="form_form_list"),
     path("forms/<int:pk>/", views.FormFormDetailView.as_view(), name="form_form_detail"),
+    path("pages/", views.FormPageListCreateView.as_view(), name="form_page_list"),
+    path("pages/<int:pk>/", views.FormPageDetailView.as_view(), name="form_page_detail"),
+    path("pages/<int:pk>/publish/", views.FormPagePublishView.as_view(), name="form_page_publish"),
+    path("pages/published/<slug:slug>/", views.PublishedPageView.as_view(), name="published_page"),
+    path(
+        "pages/published/<slug:slug>/submit/",
+        views.PublishedPageSubmitView.as_view(),
+        name="published_page_submit",
+    ),
 ]
