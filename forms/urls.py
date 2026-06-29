@@ -1,0 +1,15 @@
+from django.urls import path
+
+from . import views
+
+urlpatterns = [
+    path("types/", views.FormTypeListCreateView.as_view(), name="form_type_list"),
+    path("types/<int:pk>/", views.FormTypeDetailView.as_view(), name="form_type_detail"),
+    path("types/<int:pk>/full/", views.FormTypeFullView.as_view(), name="form_type_full"),
+    path("subsections/", views.FormSubsectionListCreateView.as_view(), name="form_subsection_list"),
+    path("subsections/<int:pk>/", views.FormSubsectionDetailView.as_view(), name="form_subsection_detail"),
+    path("questions/", views.FormQuestionListCreateView.as_view(), name="form_question_list"),
+    path("questions/<int:pk>/", views.FormQuestionDetailView.as_view(), name="form_question_detail"),
+    path("forms/", views.FormFormListCreateView.as_view(), name="form_form_list"),
+    path("forms/<int:pk>/", views.FormFormDetailView.as_view(), name="form_form_detail"),
+]
