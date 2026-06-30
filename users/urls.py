@@ -10,6 +10,7 @@ router.register("users_api/user_permissions", views.UserPermissionViewSet, basen
 urlpatterns = [
     path("", include(router.urls)),
     path("login/", views.LoginApi.as_view()),
+    path("register/", views.RegisterApi.as_view()),
     path("forgot-password/", views.forgotPassword, name="ResetPassword"),
     path("reset-password/", views.resetPassword, name="resetPassword"),
     path("check-user/", views.checkUser, name="checkUser"),
@@ -30,5 +31,6 @@ urlpatterns = [
     path("oauth_login/", views.oauth_login, name="FetchAzureAccessToken"),
     path("check_user_exists_or_not/", views.check_user_exists_or_not, name="check_user_exists_or_not"),
     path('get_users_list/', views.get_users_list, name='get_users_list'),
-    path('auth_check/', views.check_auth, name='check_auth')
+    path('auth_check/', views.check_auth, name='check_auth'),
+    path('my-coachees/', views.list_my_coachees, name='list_my_coachees'),
 ]

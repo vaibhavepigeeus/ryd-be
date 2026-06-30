@@ -1,14 +1,8 @@
-from datetime import timedelta
-
 from django.contrib.auth.hashers import check_password
-from documents.utils.encryption_util import decrypt_text
-
-# from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-# from rest_framework_simplejwt.tokens import RefreshToken
-from knox.models import AuthToken
 from rest_framework import serializers
 
-from .models import UserPermissions, Users
+from .constants import UserRole
+from .models import CoachCoachee, UserPermissions, Users
 from documents.models import CommonAudit
 from datetime import datetime
 import logging
@@ -81,53 +75,87 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.CharField()
-    password = serializers.CharField()
-    user = serializers.IntegerField(required=False)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
 
-    @classmethod
-    def get_token(cls, user):
-        # Access token expires in 1 hour
-        instance_access_token, access_token = AuthToken.objects.create(
-            user=user, 
-            expiry=timedelta(hours=1)
-        )
-
-        # Refresh token expires in 1 day
-        instance_refresh_token, refresh_token = AuthToken.objects.create(
-            user=user, 
-            expiry=timedelta(days=1)    
-        )
-
-        return access_token, refresh_token
-    
     def validate(self, data):
-        # Validate data using superclass method (assuming it performs validation)
-        data = super().validate(data)
+        from .auth_helpers import find_user_by_email
 
-        # Try to get the user using email, handle potential exceptions
-        try:
-            user_obj = Users.objects.get(id=data['user'])
-        except Users.DoesNotExist:
-            raise serializers.ValidationError('Invalid email')
+        email = data["email"].lower()
+        user = find_user_by_email(email, require_active=True)
 
-        decrypted_password = decrypt_text(data['password'])
-        
-        # Perform password check using Django's check_password function
-        check_user_password = check_password(decrypted_password, user_obj.password)
+        if not user:
+            inactive_user = find_user_by_email(email, require_active=False)
+            if inactive_user and inactive_user.status == "Inactive":
+                raise serializers.ValidationError("Your account is inactive. Please contact support.")
+            raise serializers.ValidationError("No account found with this email address.")
 
-        if not check_user_password:
-            raise serializers.ValidationError('Invalid password')
+        if not check_password(data["password"], user.password):
+            raise serializers.ValidationError("Invalid password.")
 
-        # Add user information and tokens to the validated data
-        data['access'], data['refresh'] = self.get_token(user_obj)
-        data['username'] = user_obj.user_name
-        data['email'] = user_obj.email
-        data['role'] = user_obj.role
-        data['status'] = user_obj.status
-        data['user_id'] = user_obj.id
-        del data['password']
+        data["user"] = user
         return data
+
+
+class RegisterSerializer(serializers.Serializer):
+    user_name = serializers.CharField(max_length=100)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_email(self, value):
+        from .auth_helpers import find_user_by_email
+
+        if find_user_by_email(value.lower(), require_active=False):
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value.lower()
+
+    def create(self, validated_data):
+        return Users.objects.create_user(
+            email=validated_data["email"],
+            password=validated_data["password"],
+            user_name=validated_data["user_name"],
+            role=UserRole.COACHEE,
+            status="Active",
+        )
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    email = serializers.SerializerMethodField()
+    coach_id = serializers.IntegerField(source="reporting_manager_id", read_only=True)
+    coach_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Users
+        fields = [
+            "id",
+            "user_name",
+            "email",
+            "role",
+            "status",
+            "coach_id",
+            "coach_name",
+        ]
+
+    def get_email(self, obj):
+        return obj.get_decrypted_email()
+
+    def get_coach_name(self, obj):
+        return obj.reporting_manager.user_name if obj.reporting_manager else None
+
+
+class CoachCoacheeListSerializer(serializers.ModelSerializer):
+    coachee_id = serializers.IntegerField(source="coachee.id", read_only=True)
+    user_name = serializers.CharField(source="coachee.user_name", read_only=True)
+    email = serializers.SerializerMethodField()
+    status = serializers.CharField(source="coachee.status", read_only=True)
+    linked_at = serializers.DateTimeField(source="created_at", read_only=True)
+
+    class Meta:
+        model = CoachCoachee
+        fields = ["coachee_id", "user_name", "email", "status", "linked_at"]
+
+    def get_email(self, obj):
+        return obj.coachee.get_decrypted_email()
 
 
 class ResetPasswordSerializer(serializers.Serializer):

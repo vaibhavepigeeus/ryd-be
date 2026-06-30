@@ -1,9 +1,9 @@
 from django.db import models
-from django.utils.translation import gettext_lazy as _
 from .managers import CustomUserManager
 from django.contrib.auth.models import AbstractBaseUser
 from documents.models import *
 from documents.utils.encryption_util import encrypt_text, decrypt_text, is_decrypted
+from .constants import UserRole
 
 
 class UserPermissions(models.Model):
@@ -16,14 +16,14 @@ class UserPermissions(models.Model):
 class Users(AbstractBaseUser):
     user_name = models.CharField(max_length=100)
     email = models.EmailField(default=None, unique=True)
-    role = models.CharField(max_length=100)
-    status = models.CharField(max_length=100)
+    role = models.CharField(max_length=100, choices=UserRole.CHOICES)
+    status = models.CharField(max_length=100, default="Active")
     is_staff = models.BooleanField(default=False)
     is_superuser = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     reporting_manager = models.ForeignKey('Users', on_delete=models.CASCADE, related_name="userss", null=True, blank=True)
     division = models.ForeignKey(Entity, on_delete=models.CASCADE, null=True, blank=True)
-    department = models.CharField(max_length=100)
+    department = models.CharField(max_length=100, blank=True, default="")
     user_permissions = models.ForeignKey(UserPermissions, on_delete=models.CASCADE, null=True, blank=True)
     user_start_date = models.DateTimeField(null=True)
     user_end_date = models.DateTimeField(null=True)
@@ -53,6 +53,14 @@ class Users(AbstractBaseUser):
     def has_module_perms(self, app_label):
         return self.is_active and self.is_superuser
 
+    @property
+    def is_coach(self):
+        return self.role == UserRole.COACH
+
+    @property
+    def is_coachee(self):
+        return self.role == UserRole.COACHEE
+
     def save(self, *args, **kwargs):
         if self.pk:
             # Check if the email field has changed
@@ -70,6 +78,33 @@ class Users(AbstractBaseUser):
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
     objects = CustomUserManager()
+
+
+class CoachCoachee(models.Model):
+    """Links a coach user to their coachee users (one coach, many coachees)."""
+
+    coach = models.ForeignKey(
+        Users,
+        on_delete=models.CASCADE,
+        related_name="coachee_links",
+    )
+    coachee = models.ForeignKey(
+        Users,
+        on_delete=models.CASCADE,
+        related_name="coach_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["coach", "coachee"],
+                name="unique_coach_coachee_pair",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.coach.user_name} → {self.coachee.user_name}"
 
 
 class ResetTokens(models.Model):
