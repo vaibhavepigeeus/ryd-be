@@ -37,7 +37,33 @@ class FormPageSerializer(serializers.ModelSerializer):
 
 
 class FormPageSubmissionSerializer(serializers.ModelSerializer):
+    page_name = serializers.CharField(source="page.page_name", read_only=True)
+
     class Meta:
         model = FormPageSubmission
-        fields = "__all__"
+        fields = ("id", "page", "page_name", "response_data", "submitted_at")
         read_only_fields = ("submitted_at",)
+
+
+class FormPageSummarySerializer(serializers.ModelSerializer):
+    submission_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = FormPage
+        fields = (
+            "id",
+            "page_name",
+            "is_published",
+            "publish_slug",
+            "updated_at",
+            "created_at",
+            "submission_count",
+        )
+
+
+class FormPageSubmissionDetailSerializer(serializers.ModelSerializer):
+    page = FormPageSerializer(read_only=True)
+
+    class Meta:
+        model = FormPageSubmission
+        fields = ("id", "page", "response_data", "submitted_at")

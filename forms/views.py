@@ -1,3 +1,4 @@
+from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -9,7 +10,9 @@ from .question_versioning import create_question_version
 from .serializers import (
     FormFormSerializer,
     FormPageSerializer,
+    FormPageSubmissionDetailSerializer,
     FormPageSubmissionSerializer,
+    FormPageSummarySerializer,
     FormQuestionSerializer,
     FormSubsectionSerializer,
     FormTypeSerializer,
@@ -132,3 +135,36 @@ class PublishedPageSubmitView(APIView):
             FormPageSubmissionSerializer(submission).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class FormPageWithResponsesListView(generics.ListAPIView):
+    """List saved builder pages with submission counts."""
+
+    serializer_class = FormPageSummarySerializer
+
+    def get_queryset(self):
+        return (
+            FormPage.objects.annotate(submission_count=Count("submissions"))
+            .order_by("-updated_at")
+        )
+
+
+class FormPageSubmissionListView(generics.ListAPIView):
+    """List submissions for a saved builder page."""
+
+    serializer_class = FormPageSubmissionSerializer
+
+    def get_queryset(self):
+        page = get_object_or_404(FormPage, pk=self.kwargs["page_id"])
+        return page.submissions.all()
+
+
+class FormPageSubmissionDetailView(APIView):
+    """Return a single submission with its page layout for read-only viewing."""
+
+    def get(self, request, submission_id):
+        submission = get_object_or_404(
+            FormPageSubmission.objects.select_related("page"),
+            pk=submission_id,
+        )
+        return Response(FormPageSubmissionDetailSerializer(submission).data)

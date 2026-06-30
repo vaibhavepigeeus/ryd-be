@@ -26,4 +26,19 @@ urlpatterns = [
         views.PublishedPageSubmitView.as_view(),
         name="published_page_submit",
     ),
+    path(
+        "pages/with-responses/",
+        views.FormPageWithResponsesListView.as_view(),
+        name="form_page_with_responses",
+    ),
+    path(
+        "pages/<int:page_id>/submissions/",
+        views.FormPageSubmissionListView.as_view(),
+        name="form_page_submissions",
+    ),
+    path(
+        "submissions/<int:submission_id>/",
+        views.FormPageSubmissionDetailView.as_view(),
+        name="form_submission_detail",
+    ),
 ]
