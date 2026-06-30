@@ -10,12 +10,23 @@ from helpers.azure_token_helper import (
 )
 from knox.auth import TokenAuthentication
 from rest_framework import status
+from rest_framework.exceptions import AuthenticationFailed
 from users.models import *
 from users.utils import send_email
 from django.conf import settings
 from decouple import config
 
 logger = logging.getLogger(__name__)
+
+
+def clean_cookie_token(value):
+    """Strip accidental suffixes (e.g. ' : username') from cookie token values."""
+    if not value:
+        return None
+    token = str(value).strip()
+    if " " in token:
+        token = token.split()[0]
+    return token or None
 
 
 class TokenVerificationMiddleware:
@@ -34,6 +45,7 @@ class TokenVerificationMiddleware:
             "/static/",
             "/media/",
             "/api/users/login",
+            "/api/users/register/",
             "/api/users/forgot-password/",
             "/api/users/token/refresh/",
             "/api/users/check-user/",
@@ -69,14 +81,13 @@ class TokenVerificationMiddleware:
 
         # Extract the token
         logger.info("Cookies: %s", request.COOKIES)
-        refresh_token = request.COOKIES.get("refreshToken")
-        access_token = request.COOKIES.get("accessToken")
+        refresh_token = clean_cookie_token(request.COOKIES.get("refreshToken"))
+        access_token = clean_cookie_token(request.COOKIES.get("accessToken"))
         login_method = request.COOKIES.get("loginMethod")
         user_id = request.COOKIES.get("userId")
 
         if not refresh_token and not access_token:
             logger.info("No token found in cookies....session expired")
-            # Iterate over all cookies in the request
             response = self.get_response(request)
             for cookie in request.COOKIES:
                 response.delete_cookie(cookie)
@@ -87,19 +98,20 @@ class TokenVerificationMiddleware:
             )
 
         try:
-            response = self.get_response(request)
+            if not user_id:
+                return JsonResponse(
+                    {"message": "Session expired. Please login again."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
 
-            # fetch User details By user_id
-            user = Users.objects.filter(id=user_id)[0]
-
-            if not user:
-                logger.info("User not found")
+            try:
+                user = Users.objects.get(id=user_id)
+            except Users.DoesNotExist:
                 return JsonResponse(
                     {"message": "User not found. Please login again."},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
 
-            # Validate Session
             if not validate_session(user=user):
                 logger.info("Session doesn't exists for user.")
                 return JsonResponse(
@@ -107,90 +119,75 @@ class TokenVerificationMiddleware:
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
 
+            refreshed_access_token = None
+
             if login_method == LoginMethods.BASIC.value:
-                # If not access_token regenerate using refresh_token
-                if not access_token:
-                    token_authentication = TokenAuthentication()
-                    user, token_model = token_authentication.authenticate_credentials(
+                if not access_token and refresh_token:
+                    user, _ = self.token_authentication.authenticate_credentials(
                         refresh_token.encode()
                     )
-
-                    user_operations_obj = Users.objects.get(email=user.email)
-
-                    access_token = AuthToken.objects.create(user_operations_obj)[1]
-                    response.set_cookie(
-                        key="accessToken",
-                        value=access_token,
-                        httponly=True,
-                        secure=True,
-                        max_age=24 * 60 * 60,
+                    user = Users.objects.get(pk=user.pk)
+                    _, refreshed_access_token = AuthToken.objects.create(user)
+                    access_token = refreshed_access_token
+                elif access_token:
+                    user, _ = self.token_authentication.authenticate_credentials(
+                        access_token.encode()
                     )
                 else:
-                    # Authenticate the token (encode token to bytes)
-                    user, token_model = (
-                        self.token_authentication.authenticate_credentials(
-                            access_token.encode()
-                        )
+                    return JsonResponse(
+                        {"message": "Session expired. Please login again."},
+                        status=status.HTTP_401_UNAUTHORIZED,
                     )
 
             elif login_method == LoginMethods.OAUTH.value:
                 try:
-                    # Decode and validate the token
                     decode_azure_token(access_token=access_token)
                 except Exception as e:
-                    if "expired" in str(e).lower():
-                        # Refresh the token using the refresh token
+                    if "expired" in str(e).lower() and refresh_token:
                         token_response = generate_azure_token(
                             authorization_code=None,
-                            refresh_token=refresh_token,  # Ensure this is supported
+                            refresh_token=refresh_token,
                         )
-
-                        access_token = token_response.get("access_token")
-                        if access_token:
-                            response.set_cookie(
-                                key="accessToken",
-                                value=access_token,
-                                httponly=True,
-                                secure=True,
-                                max_age=24 * 60 * 60,
-                            )
+                        refreshed_access_token = token_response.get("access_token")
+                        access_token = refreshed_access_token
                     else:
-                        # Optional: handle other exceptions differently or re-raise
-                        raise e
-
-            if user:
-                # Set the authenticated user object on the request
-                request.user = user
-                request.META["HTTP_X-user"] = user
-
-                save_audit_data(
-                    user,
-                    request,
-                    response.status_code,
-                    payload=request_body,
-                    response_data=response.content,
+                        raise
+            else:
+                return JsonResponse(
+                    {"error": "Invalid Login Method"},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
 
-                return response
+            request.user = user
+            request.META["HTTP_X-user"] = user
+
+            response = self.get_response(request)
+
+            if refreshed_access_token:
+                response.set_cookie(
+                    key="accessToken",
+                    value=refreshed_access_token,
+                    httponly=True,
+                    secure=settings.SESSION_COOKIE_SECURE,
+                    samesite="Lax",
+                    max_age=24 * 60 * 60,
+                )
 
             save_audit_data(
                 user,
                 request,
-                400,
+                response.status_code,
                 payload=request_body,
-                response_data="Invalid Login Method",
+                response_data=response.content,
             )
 
-            return JsonResponse(
-                {"error": "Invalid Login Method"},
+            return response
+
+        except AuthenticationFailed as e:
+            response = JsonResponse(
+                {"message": str(e), "error": str(e)},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-        except Exception as e:
-            # Authentication failed
-            response = JsonResponse(
-                {"error": str(e)}, status=status.HTTP_401_UNAUTHORIZED
-            )
-
             save_audit_data(
                 None,
                 request,
@@ -200,6 +197,9 @@ class TokenVerificationMiddleware:
             )
             logger.error("Authentication failed for the request: %s", request.path)
             return response
+        except Exception:
+            logger.exception("Unhandled error in token middleware for: %s", request.path)
+            raise
 
 
 def validate_session(user):
@@ -292,7 +292,7 @@ def save_audit_data(user, request, status_code, payload=None, response_data=None
             audit_data: {audit_data}
             \n\n Env: {settings.ENVIRONMENT}
         """
-        env = config("ENVIRONMENT")
+        env = config("ENVIRONMENT", default="DEVELOPMENT")
         if status_code not in [200, 201, 401, 404] and env == "PRODUCTION":
             send_email(
                 sender_email="cmtadmin@mosaicfintech.com",

@@ -37,10 +37,19 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from backend.token_verification_middleware import LoginMethods
+from .constants import UserRole
 
-from .models import ResetTokens, UserPermissions, Users, UserSessionManagement
-from .serializers import LoginSerializer, UserPermissionsSerializer, UserSerializer
+from .models import CoachCoachee, ResetTokens, UserPermissions, Users, UserSessionManagement
+from .serializers import (
+    CoachCoacheeListSerializer,
+    LoginSerializer,
+    RegisterSerializer,
+    UserPermissionsSerializer,
+    UserProfileSerializer,
+    UserSerializer,
+)
 from .utils import send_email
+from .auth_helpers import build_user_payload, find_user_by_email, set_auth_cookies
 from documents.utils.encryption_util import encrypt_text
 
 logger = logging.getLogger(__name__)
@@ -51,43 +60,6 @@ def get_user(request):
     user_id = request.headers.get("user-id")
     user = Users.objects.filter(id=user_id)
     return user[0]
-
-def find_user_by_email(email: str, require_active: bool = True) -> Users:
-    """
-    Optimized function to find a user by email, handling both encrypted and non-encrypted emails.
-
-    Args:
-        email: The email to search for (will be converted to lowercase)
-        require_active: If True, only returns active users
-
-    Returns:
-        Users object if found, None otherwise
-    """
-    target_email = email.lower()
-
-    # Build base query
-    base_query = Users.objects
-    if require_active:
-        base_query = base_query.filter(status="Active")
-
-    # Try to find user by exact email match first (for non-encrypted emails)
-    user = base_query.filter(email__iexact=target_email).first()
-
-    # If not found, check encrypted emails (fallback for encrypted data)
-    if not user:
-        # Get users to check encrypted emails, limit fields for performance
-        users_to_check = base_query.only('id', 'email', 'status', 'user_name')
-
-        for user_obj in users_to_check:
-            try:
-                decrypted_email = decrypt_text(user_obj.email)
-                if decrypted_email.lower() == target_email:
-                    return user_obj
-            except Exception:
-                # Skip users with decryption issues
-                continue
-
-    return user
 
 class CountModelMixin(object):
     @action(detail=False)
@@ -389,101 +361,58 @@ class LoginApi(generics.GenericAPIView):
     serializer_class = LoginSerializer
 
     def post(self, request):
-        def set_cookie(response, key, value, max_age):
-            response.set_cookie(
-                key=key,
-                value=value,
-                httponly=True,
-                secure=True,
-                max_age=max_age,
-            )
+        serializer = self.get_serializer(data=request.data)
 
-        data = request.data
-        try:
-            email = data.get("email", "").lower()
-            if not email:
-                return Response(
-                    {"message": "Email is required", "success": False, "statusCode": 400},
-                    status=400,
-                )
-
-            logger.info("Attempting to find active user with email: %s", email)
-            user = find_user_by_email(email, require_active=True)
-
-            if not user:
-                logger.info("Checking if user is inactive...")
-                inactive_user = find_user_by_email(email, require_active=False)
-
-                if inactive_user and inactive_user.status == "Inactive":
-                    logger.info("Inactive user tried to login: %s", email)
-                    return Response(
-                        {"message": "User is not active!", "success": False, "statusCode": 400},
-                        status=400,
-                    )
-
-                logger.info("No user found with email: %s", email)
-                return Response(
-                    {"message": "No account found with the given email address!", "success": False, "statusCode": 400},
-                    status=400,
-                )
-            else:
-                if user.password_updated_at and (date.today()-user.password_updated_at).days>90:
-                    return Response(
-                        {"message": "Please update your password. It is older than 90 days!", "password_update_warning": True, "success": False, "statusCode": 400},
-                        status=400,
-                    )
-
-            # Attach user ID to serializer input
-            data["user"] = user.id
-
-        except Exception as e:
-            logger.exception("User Fectching failed")
+        if not serializer.is_valid():
+            non_field_error = serializer.errors.get("non_field_errors")
+            field_error = next(iter(serializer.errors.values()), [None])[0]
+            message = non_field_error[0] if non_field_error else field_error or "Invalid credentials"
             return Response(
-                {"message": "User Fectching failed", "success": False, "statusCode": 400},
-                status=400,
+                {"message": message, "success": False, "statusCode": 400},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        serializer = self.get_serializer(data=data)
+        user = serializer.validated_data["user"]
+        user.last_login = datetime.now()
+        user.save(update_fields=["last_login"])
 
-        if serializer.is_valid():
-            validated_data = serializer.validated_data
-
-            user.last_login = datetime.now()
-            user.save()
-            logger.info("User login time updated for: %s", user.email)
-
-            response = JsonResponse(validated_data, status=200)
-
-            # Set Cookies
-            cookie_map = {
-                "accessToken": validated_data["access"],
-                "refreshToken": validated_data["refresh"],
-                "userId": user.id,
-                "loginMethod": LoginMethods.BASIC.value,
-            }
-
-            for key, val in cookie_map.items():
-                set_cookie(response, key, val, 24 * 60 * 60)
-
-            # Update UserSessionManagement
-            UserSessionManagement.objects.update_or_create(
-                user=user,
-                defaults={
-                    "logged_in_time": datetime.now(timezone.utc),
-                    "isLoggedIn": True
-                },
-            )
-            logger.info("UserSessionManagement updated, User logged in: %s", user.email)
-
-            return response
-
-        # Handle serializer validation errors
-        non_field_error = serializer.errors.get("non_field_errors")
-        message = non_field_error[0] if non_field_error else "Invalid credentials"
-        return Response(
-            {"message": message, "success": False, "statusCode": 400},
-            status=status.HTTP_400_BAD_REQUEST,
+        response = JsonResponse(
+            {
+                "message": "Login successful",
+                "success": True,
+                "user": build_user_payload(user),
+            },
+            status=200,
         )
+        set_auth_cookies(response, user)
+        return response
+
+
+class RegisterApi(generics.GenericAPIView):
+    serializer_class = RegisterSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+
+        if not serializer.is_valid():
+            first_error = next(iter(serializer.errors.values()), ["Registration failed"])[0]
+            return Response(
+                {"message": first_error, "errors": serializer.errors, "success": False},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = serializer.save()
+        response = JsonResponse(
+            {
+                "message": "Account created successfully",
+                "success": True,
+                "user": build_user_payload(user),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+        set_auth_cookies(response, user)
+        return response
+
 
 @csrf_exempt
 @api_view(["POST"])
@@ -1222,7 +1151,58 @@ def get_users_list(request):
 @csrf_exempt
 @api_view(["GET"])
 def check_auth(request):
-    """
-    Check for auth And return
-    """
-    return JsonResponse({"authenticated": True, "user_id" : request.COOKIES.get("userId")}, status=status.HTTP_200_OK)
+    user_id = request.COOKIES.get("userId")
+    if not user_id:
+        return JsonResponse({"authenticated": False}, status=status.HTTP_200_OK)
+
+    try:
+        user = Users.objects.get(id=user_id)
+    except Users.DoesNotExist:
+        return JsonResponse({"authenticated": False}, status=status.HTTP_200_OK)
+
+    return JsonResponse(
+        {
+            "authenticated": True,
+            "user": build_user_payload(user),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+def _get_coach_from_request(request):
+    coach = getattr(request, "user", None)
+    if coach and isinstance(coach, Users):
+        return coach
+
+    user_id = request.COOKIES.get("userId")
+    if not user_id:
+        return None
+
+    try:
+        return Users.objects.get(id=user_id)
+    except Users.DoesNotExist:
+        return None
+
+
+@api_view(["GET"])
+def list_my_coachees(request):
+    coach = _get_coach_from_request(request)
+    if not coach:
+        return Response(
+            {"message": "Authentication required.", "success": False},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if coach.role != UserRole.COACH:
+        return Response(
+            {"message": "Only coaches can view coachees.", "success": False},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    links = (
+        CoachCoachee.objects.filter(coach=coach)
+        .select_related("coachee")
+        .order_by("-created_at")
+    )
+    serializer = CoachCoacheeListSerializer(links, many=True)
+    return Response({"coachees": serializer.data, "count": links.count()})

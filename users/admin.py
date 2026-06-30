@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import (
+    CoachCoachee,
     ResetTokens,
     UserAuditHistory,
     UserPasswordHistory,
@@ -57,3 +58,11 @@ class UserAuditHistoryAdmin(admin.ModelAdmin):
 @admin.register(UserSessionManagement)
 class UserSessionManagementAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "isLoggedIn", "logged_in_time")
+
+
+@admin.register(CoachCoachee)
+class CoachCoacheeAdmin(admin.ModelAdmin):
+    list_display = ("id", "coach", "coachee", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("coach__user_name", "coach__email", "coachee__user_name", "coachee__email")
+    autocomplete_fields = ("coach", "coachee")
