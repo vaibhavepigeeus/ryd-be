@@ -1,13 +1,15 @@
 class UserRole:
+    ADMIN = "admin"
     COACH = "coach"
     COACHEE = "coachee"
 
     CHOICES = (
+        (ADMIN, "Admin"),
         (COACH, "Coach"),
         (COACHEE, "Coachee"),
     )
 
-    ALL = {COACH, COACHEE}
+    ALL = {ADMIN, COACH, COACHEE}
 
 
 class UserStatus:

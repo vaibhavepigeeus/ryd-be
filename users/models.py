@@ -54,6 +54,10 @@ class Users(AbstractBaseUser):
         return self.is_active and self.is_superuser
 
     @property
+    def is_admin(self):
+        return self.role == UserRole.ADMIN
+
+    @property
     def is_coach(self):
         return self.role == UserRole.COACH
 

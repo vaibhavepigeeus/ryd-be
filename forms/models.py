@@ -150,6 +150,13 @@ class FormPage(models.Model):
     """Saved form-builder page layout and content."""
 
     page_name = models.CharField(max_length=255)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_form_pages",
+    )
     layout_data = models.JSONField(default=dict)
     is_published = models.BooleanField(default=False)
     publish_slug = models.CharField(max_length=64, unique=True, null=True, blank=True)

@@ -6,6 +6,8 @@ from email.mime.text import MIMEText
 
 from django.conf import settings
 
+from backend.custom_middleware_validation import PASSWORD_ALLOWED_SPECIAL_CHARACTERS
+
 
 def generate_combination():
     lower_letters = string.ascii_lowercase
@@ -13,8 +15,11 @@ def generate_combination():
     rand_lower_letters = "".join(random.choices(lower_letters, k=3))
     rand_upper_letters = "".join(random.choices(upper_letters, k=3))
     total_letters = rand_lower_letters + rand_upper_letters
-    special_chars = ["!", "@", "#", "$", "%", "^", "&", "*", ")", "("]
-    return total_letters + str(random.randint(0, 9)) + random.choice(special_chars)
+    return (
+        total_letters
+        + str(random.randint(0, 9))
+        + random.choice(PASSWORD_ALLOWED_SPECIAL_CHARACTERS)
+    )
 
 
 def send_email(sender_email, recipient_email, subject, body):
