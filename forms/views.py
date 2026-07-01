@@ -164,7 +164,7 @@ class FormPageSubmissionListView(generics.ListAPIView):
 
     def get_queryset(self):
         page = get_object_or_404(FormPage, pk=self.kwargs["page_id"])
-        return page.submissions.all()
+        return page.submissions.select_related("submitted_by").all()
 
 
 class MySubmissionsListView(APIView):
@@ -197,7 +197,7 @@ class FormPageSubmissionDetailView(APIView):
 
     def _get_submission(self, submission_id):
         return get_object_or_404(
-            FormPageSubmission.objects.select_related("page"),
+            FormPageSubmission.objects.select_related("page", "submitted_by"),
             pk=submission_id,
         )
 

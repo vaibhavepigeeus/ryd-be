@@ -251,6 +251,113 @@ class CoachUpdateCoacheeSerializer(serializers.Serializer):
         return trimmed
 
 
+class AdminCoachListSerializer(serializers.ModelSerializer):
+    email = serializers.SerializerMethodField()
+    form_count = serializers.SerializerMethodField()
+    coachee_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Users
+        fields = ["id", "user_name", "email", "status", "form_count", "coachee_count"]
+
+    def get_email(self, obj):
+        return obj.get_decrypted_email()
+
+    def get_form_count(self, obj):
+        return self.context.get("total_forms", 0)
+
+
+class AdminCreateCoachSerializer(serializers.Serializer):
+    user_name = serializers.CharField(max_length=100)
+    email = serializers.EmailField()
+
+    def validate_user_name(self, value):
+        trimmed = value.strip()
+        if not trimmed:
+            raise serializers.ValidationError("Name cannot be empty.")
+        return trimmed
+
+    def validate_email(self, value):
+        from .auth_helpers import find_user_by_email
+
+        if find_user_by_email(value.lower(), require_active=False):
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value.lower()
+
+    def create(self, validated_data):
+        from django.utils import timezone
+
+        from .utils import generate_combination, send_welcome_password_email_safe
+
+        password = generate_combination()
+        coach = Users.objects.create_user(
+            email=validated_data["email"],
+            password=password,
+            user_name=validated_data["user_name"],
+            role=UserRole.COACH,
+            status="Active",
+            user_start_date=timezone.now(),
+        )
+        email_sent, email_error = send_welcome_password_email_safe(
+            validated_data["email"],
+            password,
+        )
+        self.email_sent = email_sent
+        self.email_error = email_error
+        return coach
+
+
+class AdminCreateCoacheeSerializer(serializers.Serializer):
+    user_name = serializers.CharField(max_length=100)
+    email = serializers.EmailField()
+    coach_id = serializers.IntegerField()
+
+    def validate_user_name(self, value):
+        trimmed = value.strip()
+        if not trimmed:
+            raise serializers.ValidationError("Name cannot be empty.")
+        return trimmed
+
+    def validate_email(self, value):
+        from .auth_helpers import find_user_by_email
+
+        if find_user_by_email(value.lower(), require_active=False):
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value.lower()
+
+    def validate_coach_id(self, value):
+        coach = Users.objects.filter(id=value, role=UserRole.COACH).first()
+        if not coach:
+            raise serializers.ValidationError("Coach not found.")
+        self.context["coach"] = coach
+        return value
+
+    def create(self, validated_data):
+        from django.utils import timezone
+
+        from .utils import generate_combination, send_welcome_password_email_safe
+
+        coach = self.context["coach"]
+        password = generate_combination()
+        coachee = Users.objects.create_user(
+            email=validated_data["email"],
+            password=password,
+            user_name=validated_data["user_name"],
+            role=UserRole.COACHEE,
+            status="Active",
+            reporting_manager=coach,
+            user_start_date=timezone.now(),
+        )
+        CoachCoachee.objects.create(coach=coach, coachee=coachee)
+        email_sent, email_error = send_welcome_password_email_safe(
+            validated_data["email"],
+            password,
+        )
+        self.email_sent = email_sent
+        self.email_error = email_error
+        return coachee
+
+
 class ResetPasswordSerializer(serializers.Serializer):
     model = Users
 

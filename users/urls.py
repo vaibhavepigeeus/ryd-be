@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from . import views
+from . import admin_views, views
 
 router = DefaultRouter()
 router.register("users_api/user", views.UserViewSet, basename="user")
@@ -38,4 +38,17 @@ urlpatterns = [
     path('my-coachees/', views.list_my_coachees, name='list_my_coachees'),
     path('coaches/', views.list_coaches, name='list_coaches'),
     path('my-coach/', views.my_coach, name='my_coach'),
+    path('admin/dashboard-stats/', admin_views.admin_dashboard_stats, name='admin_dashboard_stats'),
+    path('admin/coachees/', admin_views.admin_create_coachee, name='admin_create_coachee'),
+    path(
+        'admin/coaches/<int:coach_id>/forms/',
+        admin_views.admin_coach_forms,
+        name='admin_coach_forms',
+    ),
+    path(
+        'admin/coaches/<int:coach_id>/coachees/',
+        admin_views.admin_coach_coachees,
+        name='admin_coach_coachees',
+    ),
+    path('admin/coaches/', admin_views.admin_coaches, name='admin_coaches'),
 ]

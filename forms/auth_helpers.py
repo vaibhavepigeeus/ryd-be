@@ -1,3 +1,6 @@
+from knox.auth import TokenAuthentication
+
+from backend.token_verification_middleware import clean_cookie_token
 from users.models import Users
 
 
@@ -7,10 +10,20 @@ def get_user_from_request(request):
         return user
 
     user_id = request.COOKIES.get("userId")
-    if not user_id:
-        return None
+    if user_id:
+        try:
+            return Users.objects.get(id=user_id)
+        except Users.DoesNotExist:
+            pass
 
-    try:
-        return Users.objects.get(id=user_id)
-    except Users.DoesNotExist:
-        return None
+    access_token = clean_cookie_token(request.COOKIES.get("accessToken"))
+    if access_token:
+        try:
+            token_user, _ = TokenAuthentication().authenticate_credentials(
+                access_token.encode(),
+            )
+            return Users.objects.get(pk=token_user.pk)
+        except Exception:
+            pass
+
+    return None
