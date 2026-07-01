@@ -11,7 +11,7 @@ from decouple import config
 from django.conf import settings
 from django.contrib.auth import logout
 from django.contrib.auth.hashers import check_password, make_password
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -43,6 +43,9 @@ from .constants import UserRole
 
 from .models import CoachCoachee, ResetTokens, UserPermissions, Users, UserSessionManagement
 from .serializers import (
+    AdminCoachListSerializer,
+    AdminCreateCoachSerializer,
+    AdminCreateCoacheeSerializer,
     CoachCoacheeListSerializer,
     CoachCreateCoacheeSerializer,
     CoachLinkCoacheeSerializer,
@@ -1431,5 +1434,194 @@ def my_coach(request):
             "coach_id": coach.id,
             "coach_name": coach.user_name,
             "user": UserProfileSerializer(user).data,
+        }
+    )
+
+
+def _get_admin_from_request(request):
+    user = _get_user_from_request(request)
+    if user and user.role == UserRole.ADMIN:
+        return user
+    return None
+
+
+def _admin_forbidden():
+    return Response(
+        {"message": "Admin access required.", "success": False},
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+@api_view(["GET"])
+def admin_dashboard_stats(request):
+    admin = _get_admin_from_request(request)
+    if not admin:
+        if not _get_user_from_request(request):
+            return Response(
+                {"message": "Authentication required.", "success": False},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return _admin_forbidden()
+
+    from forms.models import FormPage
+
+    return Response(
+        {
+            "total_coaches": Users.objects.filter(role=UserRole.COACH).count(),
+            "total_coachees": Users.objects.filter(role=UserRole.COACHEE).count(),
+            "total_forms": FormPage.objects.count(),
+            "active_coaches": Users.objects.filter(
+                role=UserRole.COACH, status="Active"
+            ).count(),
+        }
+    )
+
+
+@api_view(["GET", "POST"])
+def admin_coaches(request):
+    admin = _get_admin_from_request(request)
+    if not admin:
+        if not _get_user_from_request(request):
+            return Response(
+                {"message": "Authentication required.", "success": False},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return _admin_forbidden()
+
+    if request.method == "POST":
+        serializer = AdminCreateCoachSerializer(data=request.data)
+        if not serializer.is_valid():
+            first_error = next(iter(serializer.errors.values()), ["Invalid data"])[0]
+            return Response(
+                {
+                    "message": first_error,
+                    "errors": serializer.errors,
+                    "success": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        coach = serializer.save()
+        return Response(
+            {
+                "message": "Coach created. A login password has been sent to their email.",
+                "success": True,
+                "coach": {
+                    "id": coach.id,
+                    "user_name": coach.user_name,
+                    "email": coach.get_decrypted_email(),
+                    "status": coach.status,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    coaches = (
+        Users.objects.filter(role=UserRole.COACH)
+        .annotate(
+            form_count=Count("created_form_pages", distinct=True),
+            coachee_count=Count("coachee_links", distinct=True),
+        )
+        .order_by("user_name")
+    )
+    serializer = AdminCoachListSerializer(coaches, many=True)
+    return Response({"coaches": serializer.data, "count": coaches.count()})
+
+
+@api_view(["POST"])
+def admin_create_coachee(request):
+    admin = _get_admin_from_request(request)
+    if not admin:
+        if not _get_user_from_request(request):
+            return Response(
+                {"message": "Authentication required.", "success": False},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return _admin_forbidden()
+
+    serializer = AdminCreateCoacheeSerializer(data=request.data)
+    if not serializer.is_valid():
+        first_error = next(iter(serializer.errors.values()), ["Invalid data"])[0]
+        return Response(
+            {
+                "message": first_error,
+                "errors": serializer.errors,
+                "success": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    link = serializer.save()
+    return Response(
+        {
+            "message": "Coachee created. A login password has been sent to their email.",
+            "success": True,
+            "coachee": CoachCoacheeListSerializer(link).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET"])
+def admin_coach_forms(request, coach_id):
+    admin = _get_admin_from_request(request)
+    if not admin:
+        if not _get_user_from_request(request):
+            return Response(
+                {"message": "Authentication required.", "success": False},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return _admin_forbidden()
+
+    from forms.models import FormPage
+    from forms.serializers import FormPageSummarySerializer
+
+    coach = get_object_or_404(Users, id=coach_id, role=UserRole.COACH)
+    pages = (
+        FormPage.objects.filter(created_by=coach)
+        .annotate(submission_count=Count("submissions"))
+        .order_by("-updated_at")
+    )
+    serializer = FormPageSummarySerializer(pages, many=True)
+    return Response(
+        {
+            "coach": {
+                "id": coach.id,
+                "user_name": coach.user_name,
+                "email": coach.get_decrypted_email(),
+            },
+            "forms": serializer.data,
+            "count": pages.count(),
+        }
+    )
+
+
+@api_view(["GET"])
+def admin_coach_coachees(request, coach_id):
+    admin = _get_admin_from_request(request)
+    if not admin:
+        if not _get_user_from_request(request):
+            return Response(
+                {"message": "Authentication required.", "success": False},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return _admin_forbidden()
+
+    coach = get_object_or_404(Users, id=coach_id, role=UserRole.COACH)
+    links = (
+        CoachCoachee.objects.filter(coach=coach)
+        .select_related("coachee")
+        .order_by("-created_at")
+    )
+    serializer = CoachCoacheeListSerializer(links, many=True)
+    return Response(
+        {
+            "coach": {
+                "id": coach.id,
+                "user_name": coach.user_name,
+                "email": coach.get_decrypted_email(),
+            },
+            "coachees": serializer.data,
+            "count": links.count(),
         }
     )

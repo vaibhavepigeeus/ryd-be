@@ -8,6 +8,16 @@ from django.utils.deprecation import MiddlewareMixin
 
 logger = logging.getLogger(__name__)
 
+# Single characters blocked by SpecialCharacterMiddleware (from special_chars_list).
+REQUEST_BLOCKED_CHARACTERS = set('"#;=\\~<>+/^&|')
+
+# Safe symbols for auto-generated passwords — must not contain blocked characters.
+PASSWORD_ALLOWED_SPECIAL_CHARACTERS = "!@$%*()_-?"
+
+PASSWORD_FIELD_NAMES = frozenset(
+    {"password", "oldpassword", "repassword"},
+)
+
 
 class NotFoundMiddleware:
     def __init__(self, get_response):
@@ -32,12 +42,13 @@ class SpecialCharacterMiddleware(MiddlewareMixin):
 
     # Add fields to ignore while special char check
     ignore_fields = [
-        'initialState', 
+        'initialState',
         'document_file',
         'fromDate',
         'toDate',
         'key',
-        'authorization_code'
+        'authorization_code',
+        *PASSWORD_FIELD_NAMES,
     ]
 
     special_chars_list = [
@@ -144,11 +155,11 @@ class CustomMiddleware(MiddlewareMixin):
         "comment",
         "comments",
         "file",
-        "password",
         "initialState",
         "key",
         "authorization_code",
-        "permission_key"
+        "permission_key",
+        *PASSWORD_FIELD_NAMES,
     }
     SQL_PATTERNS = [
         # Basic SQL commands

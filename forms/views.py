@@ -97,8 +97,21 @@ class FormTypeFullView(APIView):
 
 
 class FormPageListCreateView(generics.ListCreateAPIView):
-    queryset = FormPage.objects.all()
     serializer_class = FormPageSerializer
+
+    def get_queryset(self):
+        user = get_user_from_request(self.request)
+        queryset = FormPage.objects.all()
+        if user and user.role == UserRole.COACH:
+            queryset = queryset.filter(created_by=user)
+        return queryset.order_by("-updated_at")
+
+    def perform_create(self, serializer):
+        user = get_user_from_request(self.request)
+        if user and user.role == UserRole.COACH:
+            serializer.save(created_by=user)
+        else:
+            serializer.save()
 
 
 class FormPageDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -151,10 +164,11 @@ class FormPageWithResponsesListView(generics.ListAPIView):
     serializer_class = FormPageSummarySerializer
 
     def get_queryset(self):
-        return (
-            FormPage.objects.annotate(submission_count=Count("submissions"))
-            .order_by("-updated_at")
-        )
+        user = get_user_from_request(self.request)
+        queryset = FormPage.objects.annotate(submission_count=Count("submissions"))
+        if user and user.role == UserRole.COACH:
+            queryset = queryset.filter(created_by=user)
+        return queryset.order_by("-updated_at")
 
 
 class FormPageSubmissionListView(generics.ListAPIView):

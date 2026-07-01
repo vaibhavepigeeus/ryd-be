@@ -38,4 +38,9 @@ urlpatterns = [
     path('my-coachees/', views.list_my_coachees, name='list_my_coachees'),
     path('coaches/', views.list_coaches, name='list_coaches'),
     path('my-coach/', views.my_coach, name='my_coach'),
+    path('admin/dashboard-stats/', views.admin_dashboard_stats, name='admin_dashboard_stats'),
+    path('admin/coaches/', views.admin_coaches, name='admin_coaches'),
+    path('admin/coachees/', views.admin_create_coachee, name='admin_create_coachee'),
+    path('admin/coaches/<int:coach_id>/forms/', views.admin_coach_forms, name='admin_coach_forms'),
+    path('admin/coaches/<int:coach_id>/coachees/', views.admin_coach_coachees, name='admin_coach_coachees'),
 ]
