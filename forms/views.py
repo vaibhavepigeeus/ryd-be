@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db.models import Count
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -206,18 +207,52 @@ class MySubmissionsListView(APIView):
 
 
 class FormPageSubmissionDetailView(APIView):
-    """Return a single submission with its page layout for read-only viewing."""
+    """Return or update a single submission with its page layout."""
 
-    def get(self, request, submission_id):
-        submission = get_object_or_404(
+    def _get_submission(self, submission_id):
+        return get_object_or_404(
             FormPageSubmission.objects.select_related("page"),
             pk=submission_id,
         )
+
+    def _check_coachee_access(self, user, submission):
+        if not user:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if user.role != UserRole.COACHEE:
+            return Response(
+                {"detail": "Only coachees can access their submissions."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if submission.submitted_by_id != user.id:
+            return Response(
+                {"detail": "Submission not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return None
+
+    def get(self, request, submission_id):
+        submission = self._get_submission(submission_id)
         user = get_user_from_request(request)
         if user and user.role == UserRole.COACHEE:
-            if submission.submitted_by_id != user.id:
-                return Response(
-                    {"detail": "Submission not found."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+            denied = self._check_coachee_access(user, submission)
+            if denied:
+                return denied
         return Response(FormPageSubmissionDetailSerializer(submission).data)
+
+    def patch(self, request, submission_id):
+        submission = self._get_submission(submission_id)
+        user = get_user_from_request(request)
+        denied = self._check_coachee_access(user, submission)
+        if denied:
+            return denied
+
+        submission.response_data = request.data
+        submission.submitted_at = timezone.now()
+        submission.save(update_fields=["response_data", "submitted_at"])
+        return Response(FormPageSubmissionSerializer(submission).data)
