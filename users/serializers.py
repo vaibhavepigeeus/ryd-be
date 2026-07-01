@@ -251,6 +251,88 @@ class CoachUpdateCoacheeSerializer(serializers.Serializer):
         return trimmed
 
 
+class AdminCoachListSerializer(serializers.ModelSerializer):
+    email = serializers.SerializerMethodField()
+    form_count = serializers.IntegerField(read_only=True)
+    coachee_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Users
+        fields = ["id", "user_name", "email", "status", "form_count", "coachee_count"]
+
+    def get_email(self, obj):
+        return obj.get_decrypted_email()
+
+
+class AdminCreateCoachSerializer(serializers.Serializer):
+    user_name = serializers.CharField(max_length=100)
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        from .auth_helpers import find_user_by_email
+
+        if find_user_by_email(value.lower(), require_active=False):
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value.lower()
+
+    def create(self, validated_data):
+        from django.utils import timezone
+
+        from .utils import generate_combination, send_welcome_password_email
+
+        password = generate_combination()
+        coach = Users.objects.create_user(
+            email=validated_data["email"],
+            password=password,
+            user_name=validated_data["user_name"],
+            role=UserRole.COACH,
+            status="Active",
+            user_start_date=timezone.now(),
+        )
+        send_welcome_password_email(validated_data["email"], password)
+        return coach
+
+
+class AdminCreateCoacheeSerializer(serializers.Serializer):
+    user_name = serializers.CharField(max_length=100)
+    email = serializers.EmailField()
+    coach_id = serializers.IntegerField()
+
+    def validate_email(self, value):
+        from .auth_helpers import find_user_by_email
+
+        if find_user_by_email(value.lower(), require_active=False):
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value.lower()
+
+    def validate_coach_id(self, value):
+        coach = Users.objects.filter(id=value, role=UserRole.COACH, status="Active").first()
+        if not coach:
+            raise serializers.ValidationError("Active coach not found.")
+        self.context["coach"] = coach
+        return value
+
+    def create(self, validated_data):
+        from django.utils import timezone
+
+        from .utils import generate_combination, send_welcome_password_email
+
+        coach = self.context["coach"]
+        password = generate_combination()
+        coachee = Users.objects.create_user(
+            email=validated_data["email"],
+            password=password,
+            user_name=validated_data["user_name"],
+            role=UserRole.COACHEE,
+            status="Active",
+            reporting_manager=coach,
+            user_start_date=timezone.now(),
+        )
+        link = CoachCoachee.objects.create(coach=coach, coachee=coachee)
+        send_welcome_password_email(validated_data["email"], password)
+        return link
+
+
 class ResetPasswordSerializer(serializers.Serializer):
     model = Users
 

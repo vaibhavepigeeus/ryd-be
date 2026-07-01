@@ -33,7 +33,14 @@ class FormPageSerializer(serializers.ModelSerializer):
     class Meta:
         model = FormPage
         fields = "__all__"
-        read_only_fields = ("created_at", "updated_at", "publish_slug", "published_at", "is_published")
+        read_only_fields = (
+            "created_at",
+            "updated_at",
+            "publish_slug",
+            "published_at",
+            "is_published",
+            "created_by",
+        )
 
 
 class FormPageSubmissionSerializer(serializers.ModelSerializer):
