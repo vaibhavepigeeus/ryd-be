@@ -46,6 +46,7 @@ class TokenVerificationMiddleware:
             "/media/",
             "/api/users/login",
             "/api/users/register/",
+            "/api/users/check-login/",
             "/api/users/forgot-password/",
             "/api/users/token/refresh/",
             "/api/users/check-user/",

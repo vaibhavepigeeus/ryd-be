@@ -10,6 +10,7 @@ router.register("users_api/user_permissions", views.UserPermissionViewSet, basen
 urlpatterns = [
     path("", include(router.urls)),
     path("login/", views.LoginApi.as_view()),
+    path("check-login/", views.check_login, name="check_login"),
     path("register/", views.RegisterApi.as_view()),
     path("forgot-password/", views.forgotPassword, name="ResetPassword"),
     path("reset-password/", views.resetPassword, name="resetPassword"),
@@ -32,5 +33,9 @@ urlpatterns = [
     path("check_user_exists_or_not/", views.check_user_exists_or_not, name="check_user_exists_or_not"),
     path('get_users_list/', views.get_users_list, name='get_users_list'),
     path('auth_check/', views.check_auth, name='check_auth'),
+    path('my-coachees/link/', views.link_coachee, name='link_coachee'),
+    path('my-coachees/update/', views.update_my_coachee, name='update_my_coachee'),
     path('my-coachees/', views.list_my_coachees, name='list_my_coachees'),
+    path('coaches/', views.list_coaches, name='list_coaches'),
+    path('my-coach/', views.my_coach, name='my_coach'),
 ]

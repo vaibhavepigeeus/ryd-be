@@ -13,6 +13,8 @@ from django.contrib.auth import logout
 from django.contrib.auth.hashers import check_password, make_password
 from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django_otp.plugins.otp_totp.models import TOTPDevice
 from documents.models import *
@@ -42,13 +44,17 @@ from .constants import UserRole
 from .models import CoachCoachee, ResetTokens, UserPermissions, Users, UserSessionManagement
 from .serializers import (
     CoachCoacheeListSerializer,
+    CoachCreateCoacheeSerializer,
+    CoachLinkCoacheeSerializer,
+    CoachListItemSerializer,
+    CoachUpdateCoacheeSerializer,
     LoginSerializer,
     RegisterSerializer,
     UserPermissionsSerializer,
     UserProfileSerializer,
     UserSerializer,
 )
-from .utils import send_email
+from .utils import generate_combination, send_email, send_welcome_password_email
 from .auth_helpers import build_user_payload, find_user_by_email, set_auth_cookies
 from documents.utils.encryption_util import encrypt_text
 
@@ -67,20 +73,6 @@ class CountModelMixin(object):
         queryset = self.filter_queryset(self.get_queryset())
         content = {"count": queryset.count()}
         return Response(content)
-
-
-def generate_combination():
-    combination = ""
-    lower_letters = string.ascii_lowercase
-    upper_letters = string.ascii_uppercase
-    rand_lower_letters = "".join(random.choices(lower_letters, k=3))
-    rand_upper_letters = "".join(random.choices(upper_letters, k=3))
-    total_letters = rand_lower_letters + rand_upper_letters
-    special_chars = ["!", "@", "#", "$", "%", "^", "&", "*", ")", "("]
-    combination = (
-        total_letters + str(random.randint(0, 9)) + random.choice(special_chars)
-    )
-    return combination
 
 
 # @login_required
@@ -234,13 +226,11 @@ class UserViewSet(viewsets.ModelViewSet, CountModelMixin):
         #                                 status=data["status"], user_permissions=user_per_id)
         new_user.save()
         if new_user:
-            imagepath = config("MOSAIC_LOGO_IMAGE")
-            email_from = settings.EMAIL_HOST_USER
-            email_to = data["email"].lower()
-            recipient_list = [email_to]
-            subject = "Welcome to Mosaic Insurance"
-            body = settings.USER_ONBOARD.format(password=passwords, imagepath=imagepath, env_name=settings.ENVIRONMENT)
-            send_email(email_from, recipient_list, subject, body)
+            send_welcome_password_email(
+                data["email"].lower(),
+                passwords,
+                subject="Welcome to Mosaic Insurance",
+            )
 
         serializer = UserSerializer(new_user)
         data = serializer.data
@@ -373,7 +363,7 @@ class LoginApi(generics.GenericAPIView):
             )
 
         user = serializer.validated_data["user"]
-        user.last_login = datetime.now()
+        user.last_login = timezone.now()
         user.save(update_fields=["last_login"])
 
         response = JsonResponse(
@@ -386,6 +376,62 @@ class LoginApi(generics.GenericAPIView):
         )
         set_auth_cookies(response, user)
         return response
+
+
+@csrf_exempt
+@api_view(["POST"])
+def check_login(request):
+    """First-time login: email only — generates and emails a password. Returning users get password field."""
+    email = (request.data.get("email") or "").lower().strip()
+    if not email:
+        return Response(
+            {"message": "Email is required.", "success": False, "statusCode": 400},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user = find_user_by_email(email, require_active=True)
+    if not user:
+        inactive_user = find_user_by_email(email, require_active=False)
+        if inactive_user and inactive_user.status == "Inactive":
+            return Response(
+                {"message": "Your account is inactive. Please contact support.", "success": False, "statusCode": 400},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"message": "No account found with this email address.", "success": False, "statusCode": 400},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if user.last_login is None:
+        new_password = generate_combination()
+        user.password = make_password(new_password)
+        user.save(update_fields=["password"])
+        send_welcome_password_email(
+            decrypt_text(user.email),
+            new_password,
+            subject="Your login password",
+        )
+        return JsonResponse(
+            {
+                "message": "A login password has been sent to your email. Use it to sign in.",
+                "success": True,
+                "passwordSent": True,
+                "showPasswordField": True,
+                "statusCode": 200,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    return JsonResponse(
+        {
+            "message": "Enter your password to continue.",
+            "success": True,
+            "passwordSent": False,
+            "showPasswordField": True,
+            "statusCode": 200,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 
 class RegisterApi(generics.GenericAPIView):
@@ -402,16 +448,13 @@ class RegisterApi(generics.GenericAPIView):
             )
 
         user = serializer.save()
-        response = JsonResponse(
+        return JsonResponse(
             {
-                "message": "Account created successfully",
+                "message": "Account created. A login password has been sent to your email.",
                 "success": True,
-                "user": build_user_payload(user),
             },
             status=status.HTTP_201_CREATED,
         )
-        set_auth_cookies(response, user)
-        return response
 
 
 @csrf_exempt
@@ -883,14 +926,7 @@ def activateUser(request):
             user.user_start_date = datetime.today()
             user.save()
 
-            email_from = settings.EMAIL_HOST_USER
-            email_to = email
-            recipient_list = [email_to]
-            imagepath = config("MOSAIC_LOGO_IMAGE")
-
-            subject = "Welcome to Mosaic Insurance"
-            body = settings.USER_ONBOARD.format(password=passwords, imagepath=imagepath)
-            send_email(email_from, recipient_list, subject, body)
+            send_welcome_password_email(email, passwords, subject="Welcome to Mosaic Insurance")
             sendResponse = {
                 "Message": "Email is sent successfully!",
                 "statusCode": status.HTTP_200_OK,
@@ -1184,7 +1220,7 @@ def _get_coach_from_request(request):
         return None
 
 
-@api_view(["GET"])
+@api_view(["GET", "POST"])
 def list_my_coachees(request):
     coach = _get_coach_from_request(request)
     if not coach:
@@ -1195,8 +1231,34 @@ def list_my_coachees(request):
 
     if coach.role != UserRole.COACH:
         return Response(
-            {"message": "Only coaches can view coachees.", "success": False},
+            {"message": "Only coaches can manage coachees.", "success": False},
             status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "POST":
+        serializer = CoachCreateCoacheeSerializer(
+            data=request.data,
+            context={"coach": coach},
+        )
+        if not serializer.is_valid():
+            first_error = next(iter(serializer.errors.values()), ["Invalid data"])[0]
+            return Response(
+                {
+                    "message": first_error,
+                    "errors": serializer.errors,
+                    "success": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        link = serializer.save()
+        return Response(
+            {
+                "message": "Coachee created. A login password has been sent to their email.",
+                "success": True,
+                "coachee": CoachCoacheeListSerializer(link).data,
+            },
+            status=status.HTTP_201_CREATED,
         )
 
     links = (
@@ -1206,3 +1268,168 @@ def list_my_coachees(request):
     )
     serializer = CoachCoacheeListSerializer(links, many=True)
     return Response({"coachees": serializer.data, "count": links.count()})
+
+
+@api_view(["POST"])
+def link_coachee(request):
+    coach = _get_coach_from_request(request)
+    if not coach:
+        return Response(
+            {"message": "Authentication required.", "success": False},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if coach.role != UserRole.COACH:
+        return Response(
+            {"message": "Only coaches can add coachees.", "success": False},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = CoachLinkCoacheeSerializer(
+        data=request.data,
+        context={"coach": coach},
+    )
+    if not serializer.is_valid():
+        first_error = next(iter(serializer.errors.values()), ["Invalid data"])[0]
+        return Response(
+            {
+                "message": first_error,
+                "errors": serializer.errors,
+                "success": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    link = serializer.save()
+    return Response(
+        {
+            "message": "Coachee added to your account successfully.",
+            "success": True,
+            "coachee": CoachCoacheeListSerializer(link).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["PATCH", "PUT", "POST"])
+def update_my_coachee(request):
+    coach = _get_coach_from_request(request)
+    if not coach:
+        return Response(
+            {"message": "Authentication required.", "success": False},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if coach.role != UserRole.COACH:
+        return Response(
+            {"message": "Only coaches can update coachees.", "success": False},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    coachee_id = request.data.get("coachee_id")
+    if not coachee_id:
+        return Response(
+            {"message": "coachee_id is required.", "success": False},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    link = (
+        CoachCoachee.objects.filter(coach=coach, coachee_id=coachee_id)
+        .select_related("coachee")
+        .first()
+    )
+    if not link:
+        return Response(
+            {"message": "Coachee not found on your account.", "success": False},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    serializer = CoachUpdateCoacheeSerializer(data=request.data, partial=True)
+    if not serializer.is_valid():
+        first_error = next(iter(serializer.errors.values()), ["Invalid data"])[0]
+        return Response(
+            {
+                "message": first_error,
+                "errors": serializer.errors,
+                "success": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    link.coachee.user_name = serializer.validated_data["user_name"]
+    link.coachee.save(update_fields=["user_name"])
+
+    return Response(
+        {
+            "message": "Coachee name updated successfully.",
+            "success": True,
+            "coachee": CoachCoacheeListSerializer(link).data,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+def _get_user_from_request(request):
+    return _get_coach_from_request(request)
+
+
+@api_view(["GET"])
+def list_coaches(request):
+    user = _get_user_from_request(request)
+    if not user:
+        return Response(
+            {"message": "Authentication required.", "success": False},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    coaches = Users.objects.filter(role=UserRole.COACH, status="Active").order_by("user_name")
+    serializer = CoachListItemSerializer(coaches, many=True)
+    return Response({"coaches": serializer.data, "count": coaches.count()})
+
+
+@api_view(["GET", "PUT"])
+def my_coach(request):
+    user = _get_user_from_request(request)
+    if not user:
+        return Response(
+            {"message": "Authentication required.", "success": False},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if user.role != UserRole.COACHEE:
+        return Response(
+            {"message": "Only coachees can manage their coach.", "success": False},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "GET":
+        coach = user.reporting_manager
+        return Response(
+            {
+                "coach_id": coach.id if coach else None,
+                "coach_name": coach.user_name if coach else None,
+            }
+        )
+
+    coach_id = request.data.get("coach_id")
+    if not coach_id:
+        return Response(
+            {"message": "coach_id is required.", "success": False},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    coach = get_object_or_404(Users, id=coach_id, role=UserRole.COACH, status="Active")
+    user.reporting_manager = coach
+    user.save(update_fields=["reporting_manager"])
+    CoachCoachee.objects.filter(coachee=user).exclude(coach=coach).delete()
+    CoachCoachee.objects.get_or_create(coach=coach, coachee=user)
+
+    return Response(
+        {
+            "message": "Coach updated successfully.",
+            "success": True,
+            "coach_id": coach.id,
+            "coach_name": coach.user_name,
+            "user": UserProfileSerializer(user).data,
+        }
+    )

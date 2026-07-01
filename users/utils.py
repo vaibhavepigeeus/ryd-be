@@ -1,27 +1,63 @@
+import random
 import smtplib
-from email.mime.text import MIMEText
+import string
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 from django.conf import settings
+
+
+def generate_combination():
+    lower_letters = string.ascii_lowercase
+    upper_letters = string.ascii_uppercase
+    rand_lower_letters = "".join(random.choices(lower_letters, k=3))
+    rand_upper_letters = "".join(random.choices(upper_letters, k=3))
+    total_letters = rand_lower_letters + rand_upper_letters
+    special_chars = ["!", "@", "#", "$", "%", "^", "&", "*", ")", "("]
+    return total_letters + str(random.randint(0, 9)) + random.choice(special_chars)
+
 
 def send_email(sender_email, recipient_email, subject, body):
     message = MIMEMultipart()
     smtp_username = settings.SMTP_USERNAME
     smtp_password = settings.SMTP_PASSWORD
     smtp_host = settings.EMAIL_HOST
-    message['From'] = sender_email
-    message['To'] = recipient_email[0]
-    message['Subject'] = subject
-    
-    message.attach(MIMEText(body, 'html'))
-    with smtplib.SMTP(smtp_host, 587) as server:
-        server.starttls()
-        server.login(smtp_username, smtp_password)
-        server.sendmail(sender_email, recipient_email, message.as_string())
+    smtp_port = settings.EMAIL_PORT
+    message["From"] = sender_email
+    message["To"] = recipient_email[0]
+    message["Subject"] = subject
+    message.attach(MIMEText(body, "html"))
+
+    if settings.EMAIL_USE_SSL:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
+            server.login(smtp_username, smtp_password)
+            server.sendmail(sender_email, recipient_email, message.as_string())
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            if settings.EMAIL_USE_TLS:
+                server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(sender_email, recipient_email, message.as_string())
+
+
+def send_welcome_password_email(recipient_email, password, subject=None):
+    subject = subject or "Welcome – your login password"
+    body = settings.USER_ONBOARD.format(
+        password=password,
+        env_name=settings.ENVIRONMENT,
+    )
+    send_email(
+        sender_email=settings.EMAIL_HOST_USER,
+        recipient_email=[recipient_email],
+        subject=subject,
+        body=body,
+    )
+
 
 def get_masked_email(email):
     try:
-        user_part, domain_part = email.split("@", 1)
+        _, domain_part = email.split("@", 1)
         masked_email = f"***@{domain_part}"
-    except:
-        masked_email = email  # In case the email is not in standard format
+    except Exception:
+        masked_email = email
     return masked_email

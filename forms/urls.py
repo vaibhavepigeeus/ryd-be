@@ -37,6 +37,11 @@ urlpatterns = [
         name="form_page_submissions",
     ),
     path(
+        "submissions/mine/",
+        views.MySubmissionsListView.as_view(),
+        name="my_submissions",
+    ),
+    path(
         "submissions/<int:submission_id>/",
         views.FormPageSubmissionDetailView.as_view(),
         name="form_submission_detail",

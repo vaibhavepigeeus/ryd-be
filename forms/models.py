@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 from django.db.models import Max
 from django.utils import timezone
@@ -178,6 +179,13 @@ class FormPageSubmission(models.Model):
         FormPage,
         on_delete=models.CASCADE,
         related_name="submissions",
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="form_submissions",
     )
     response_data = models.JSONField(default=dict)
     submitted_at = models.DateTimeField(auto_now_add=True)

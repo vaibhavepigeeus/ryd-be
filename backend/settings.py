@@ -89,13 +89,13 @@ TEMPLATES = [
 AUTH_USER_MODEL = "users.Users"
 WSGI_APPLICATION = "backend.wsgi.application"
 
-EMAIL_HOST = config("EMAIL_HOST", default="smtp.gmail.com")
-EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
-EMAIL_USE_TLS = True
-EMAIL_PORT = 587
-EMAIL_USE_SSL = False
-SMTP_USERNAME = config("SMTP_USERNAME", default="")
-SMTP_PASSWORD = config("SMTP_PASSWORD", default="")
+EMAIL_HOST = config("SMTP_SERVER", default=config("EMAIL_HOST", default="mail.epigeeus.com"))
+EMAIL_HOST_USER = config("EMAIL_USER", default=config("EMAIL_HOST_USER", default=""))
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=True, cast=bool)
+EMAIL_PORT = config("SMTP_PORT", default=587, cast=int)
+EMAIL_USE_SSL = config("EMAIL_USE_SSL", default=False, cast=bool)
+SMTP_USERNAME = config("EMAIL_USER", default=config("SMTP_USERNAME", default=""))
+SMTP_PASSWORD = config("EMAIL_PASS", default=config("SMTP_PASSWORD", default=""))
 
 DATABASES = {
     "default": {

@@ -1,8 +1,13 @@
+from django.conf import settings
 from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from users.constants import UserRole
+
+from .auth_helpers import get_user_from_request
 
 from .models import FormForm, FormPage, FormPageSubmission, FormQuestion, FormSubsection, FormType
 from .questionnaire import build_questionnaire_detail
@@ -127,9 +132,11 @@ class PublishedPageSubmitView(APIView):
 
     def post(self, request, slug):
         page = get_object_or_404(FormPage, publish_slug=slug, is_published=True)
+        user = get_user_from_request(request)
         submission = FormPageSubmission.objects.create(
             page=page,
             response_data=request.data,
+            submitted_by=user if user else None,
         )
         return Response(
             FormPageSubmissionSerializer(submission).data,
@@ -159,6 +166,31 @@ class FormPageSubmissionListView(generics.ListAPIView):
         return page.submissions.all()
 
 
+class MySubmissionsListView(APIView):
+    """List form submissions for the authenticated coachee."""
+
+    def get(self, request):
+        user = get_user_from_request(request)
+        if not user:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if user.role != UserRole.COACHEE:
+            return Response(
+                {"detail": "Only coachees can view their submissions."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        submissions = (
+            FormPageSubmission.objects.filter(submitted_by=user)
+            .select_related("page")
+            .order_by("-submitted_at")
+        )
+        return Response(FormPageSubmissionSerializer(submissions, many=True).data)
+
+
 class FormPageSubmissionDetailView(APIView):
     """Return a single submission with its page layout for read-only viewing."""
 
@@ -167,4 +199,11 @@ class FormPageSubmissionDetailView(APIView):
             FormPageSubmission.objects.select_related("page"),
             pk=submission_id,
         )
+        user = get_user_from_request(request)
+        if user and user.role == UserRole.COACHEE:
+            if submission.submitted_by_id != user.id:
+                return Response(
+                    {"detail": "Submission not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
         return Response(FormPageSubmissionDetailSerializer(submission).data)

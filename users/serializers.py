@@ -100,7 +100,6 @@ class LoginSerializer(serializers.Serializer):
 class RegisterSerializer(serializers.Serializer):
     user_name = serializers.CharField(max_length=100)
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=8)
 
     def validate_email(self, value):
         from .auth_helpers import find_user_by_email
@@ -110,13 +109,18 @@ class RegisterSerializer(serializers.Serializer):
         return value.lower()
 
     def create(self, validated_data):
-        return Users.objects.create_user(
+        from .utils import generate_combination, send_welcome_password_email
+
+        password = generate_combination()
+        user = Users.objects.create_user(
             email=validated_data["email"],
-            password=validated_data["password"],
+            password=password,
             user_name=validated_data["user_name"],
             role=UserRole.COACHEE,
             status="Active",
         )
+        send_welcome_password_email(validated_data["email"], password)
+        return user
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -143,6 +147,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
         return obj.reporting_manager.user_name if obj.reporting_manager else None
 
 
+class CoachListItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Users
+        fields = ["id", "user_name"]
+
+
 class CoachCoacheeListSerializer(serializers.ModelSerializer):
     coachee_id = serializers.IntegerField(source="coachee.id", read_only=True)
     user_name = serializers.CharField(source="coachee.user_name", read_only=True)
@@ -156,6 +166,89 @@ class CoachCoacheeListSerializer(serializers.ModelSerializer):
 
     def get_email(self, obj):
         return obj.coachee.get_decrypted_email()
+
+
+class CoachCreateCoacheeSerializer(serializers.Serializer):
+    user_name = serializers.CharField(max_length=100)
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        from .auth_helpers import find_user_by_email
+
+        if find_user_by_email(value.lower(), require_active=False):
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value.lower()
+
+    def create(self, validated_data):
+        from django.utils import timezone
+
+        from .utils import generate_combination, send_welcome_password_email
+
+        coach = self.context["coach"]
+        password = generate_combination()
+        coachee = Users.objects.create_user(
+            email=validated_data["email"],
+            password=password,
+            user_name=validated_data["user_name"],
+            role=UserRole.COACHEE,
+            status="Active",
+            reporting_manager=coach,
+            user_start_date=timezone.now(),
+        )
+        link = CoachCoachee.objects.create(coach=coach, coachee=coachee)
+        send_welcome_password_email(validated_data["email"], password)
+        return link
+
+
+class CoachLinkCoacheeSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        from .auth_helpers import find_user_by_email
+
+        email = value.lower()
+        coach = self.context["coach"]
+        coachee = find_user_by_email(email, require_active=True)
+
+        if not coachee:
+            inactive = find_user_by_email(email, require_active=False)
+            if inactive and inactive.status == "Inactive":
+                raise serializers.ValidationError("This user account is inactive.")
+            raise serializers.ValidationError("No coachee found with this email address.")
+
+        if coachee.role != UserRole.COACHEE:
+            raise serializers.ValidationError("This email belongs to a user who is not a coachee.")
+
+        if coachee.id == coach.id:
+            raise serializers.ValidationError("You cannot add yourself as a coachee.")
+
+        existing_link = CoachCoachee.objects.filter(coachee=coachee).select_related("coach").first()
+        if existing_link:
+            if existing_link.coach_id == coach.id:
+                raise serializers.ValidationError("This coachee is already linked to your account.")
+            raise serializers.ValidationError("This coachee already has a coach assigned.")
+
+        self.context["coachee"] = coachee
+        return email
+
+    def create(self, validated_data):
+        coach = self.context["coach"]
+        coachee = self.context["coachee"]
+        link = CoachCoachee.objects.create(coach=coach, coachee=coachee)
+        if coachee.reporting_manager_id is None:
+            coachee.reporting_manager = coach
+            coachee.save(update_fields=["reporting_manager"])
+        return link
+
+
+class CoachUpdateCoacheeSerializer(serializers.Serializer):
+    user_name = serializers.CharField(max_length=100)
+
+    def validate_user_name(self, value):
+        trimmed = value.strip()
+        if not trimmed:
+            raise serializers.ValidationError("Name cannot be empty.")
+        return trimmed
 
 
 class ResetPasswordSerializer(serializers.Serializer):
