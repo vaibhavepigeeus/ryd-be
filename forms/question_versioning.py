@@ -19,5 +19,6 @@ def create_question_version(source: FormQuestion, question_text: str) -> FormQue
         association_subsection=source.association_subsection,
         question=question_text,
         answer_type=source.answer_type,
+        is_required=source.is_required,
         sequence_no=source.sequence_no,
     )

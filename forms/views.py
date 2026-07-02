@@ -105,17 +105,41 @@ class FormPageDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = FormPage.objects.all()
     serializer_class = FormPageSerializer
 
+    def update(self, request, *args, **kwargs):
+        """Override update to create a new version instead of modifying existing."""
+        page = self.get_object()
+        serializer = self.get_serializer(page, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        
+        # Create a new version with the updated data
+        new_page = page.create_new_version()
+        new_page.page_name = serializer.validated_data.get('page_name', page.page_name)
+        new_page.layout_data = serializer.validated_data.get('layout_data', page.layout_data)
+        new_page.save()
+        
+        return Response(FormPageSerializer(new_page).data)
+
 
 class FormPagePublishView(APIView):
     def post(self, request, pk):
         page = get_object_or_404(FormPage, pk=pk)
-        page.publish()
+        
+        # Create a new version before publishing
+        new_page = page.create_new_version()
+        new_page.page_name = page.page_name
+        new_page.layout_data = page.layout_data
+        new_page.save()
+        
+        # Publish the new version
+        new_page.publish()
+        
         return Response(
             {
-                "id": page.id,
-                "publish_slug": page.publish_slug,
-                "published_at": page.published_at,
-                "public_url": f"/p/{page.publish_slug}",
+                "id": new_page.id,
+                "version": new_page.version,
+                "publish_slug": new_page.publish_slug,
+                "published_at": new_page.published_at,
+                "public_url": f"/p/{new_page.publish_slug}",
             }
         )
 

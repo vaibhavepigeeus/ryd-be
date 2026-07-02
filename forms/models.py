@@ -86,6 +86,7 @@ class FormQuestion(models.Model):
     )
     question = models.TextField(help_text="Rich text (HTML) question text")
     answer_type = models.CharField(max_length=50, choices=AnswerType.choices)
+    is_required = models.BooleanField(default=False, help_text="If true, this question must be answered before the form can be submitted")
     sequence_no = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -150,6 +151,7 @@ class FormPage(models.Model):
     """Saved form-builder page layout and content."""
 
     page_name = models.CharField(max_length=255)
+    version = models.DecimalField(max_digits=4, decimal_places=1, default=Decimal("1.0"))
     layout_data = models.JSONField(default=dict)
     is_published = models.BooleanField(default=False)
     publish_slug = models.CharField(max_length=64, unique=True, null=True, blank=True)
@@ -170,8 +172,21 @@ class FormPage(models.Model):
             update_fields=["is_published", "publish_slug", "published_at", "updated_at"]
         )
 
+    def create_new_version(self):
+        """Create a new version of this page with incremented version number."""
+        new_version = self.version + Decimal("0.1")
+        new_page = FormPage.objects.create(
+            page_name=self.page_name,
+            version=new_version,
+            layout_data=self.layout_data,
+            is_published=False,
+            publish_slug=None,
+            published_at=None,
+        )
+        return new_page
+
     def __str__(self):
-        return self.page_name
+        return f"{self.page_name} v{self.version}"
 
 
 class FormPageSubmission(models.Model):
