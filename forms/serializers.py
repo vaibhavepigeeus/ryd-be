@@ -45,11 +45,22 @@ class FormPageSerializer(serializers.ModelSerializer):
 
 class FormPageSubmissionSerializer(serializers.ModelSerializer):
     page_name = serializers.CharField(source="page.page_name", read_only=True)
+    submitted_by = serializers.SerializerMethodField()
 
     class Meta:
         model = FormPageSubmission
-        fields = ("id", "page", "page_name", "response_data", "submitted_at")
+        fields = ("id", "page", "page_name", "response_data", "submitted_at", "submitted_by")
         read_only_fields = ("submitted_at",)
+
+    def get_submitted_by(self, obj):
+        user = obj.submitted_by
+        if not user:
+            return None
+        return {
+            "id": user.id,
+            "user_name": user.user_name,
+            "email": user.get_decrypted_email(),
+        }
 
 
 class FormPageSummarySerializer(serializers.ModelSerializer):
@@ -70,7 +81,18 @@ class FormPageSummarySerializer(serializers.ModelSerializer):
 
 class FormPageSubmissionDetailSerializer(serializers.ModelSerializer):
     page = FormPageSerializer(read_only=True)
+    submitted_by = serializers.SerializerMethodField()
 
     class Meta:
         model = FormPageSubmission
-        fields = ("id", "page", "response_data", "submitted_at")
+        fields = ("id", "page", "response_data", "submitted_at", "submitted_by")
+
+    def get_submitted_by(self, obj):
+        user = obj.submitted_by
+        if not user:
+            return None
+        return {
+            "id": user.id,
+            "user_name": user.user_name,
+            "email": user.get_decrypted_email(),
+        }
