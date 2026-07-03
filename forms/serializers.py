@@ -64,6 +64,7 @@ class FormPageSummarySerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "page_name",
+            "version",
             "is_published",
             "publish_slug",
             "updated_at",
