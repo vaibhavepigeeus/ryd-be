@@ -11,7 +11,7 @@ from decouple import config
 from django.conf import settings
 from django.contrib.auth import logout
 from django.contrib.auth.hashers import check_password, make_password
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -1266,8 +1266,104 @@ def list_my_coachees(request):
         .select_related("coachee")
         .order_by("-created_at")
     )
-    serializer = CoachCoacheeListSerializer(links, many=True)
+
+    from forms.models import FormPage, FormPageSubmission
+
+    assigned_forms_count = FormPage.objects.filter(is_published=True).count()
+    coachee_ids = list(links.values_list("coachee_id", flat=True))
+    completed_counts = {
+        row["submitted_by_id"]: row["completed"]
+        for row in FormPageSubmission.objects.filter(
+            submitted_by_id__in=coachee_ids,
+            page__is_published=True,
+        )
+        .values("submitted_by_id")
+        .annotate(completed=Count("page_id", distinct=True))
+    }
+
+    serializer = CoachCoacheeListSerializer(
+        links,
+        many=True,
+        context={
+            "assigned_forms_count": assigned_forms_count,
+            "completed_counts": completed_counts,
+        },
+    )
     return Response({"coachees": serializer.data, "count": links.count()})
+
+
+@api_view(["GET"])
+def coachee_forms(request, coachee_id):
+    coach = _get_coach_from_request(request)
+    if not coach:
+        return Response(
+            {"message": "Authentication required.", "success": False},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if coach.role != UserRole.COACH:
+        return Response(
+            {"message": "Only coaches can view coachee forms.", "success": False},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    link = (
+        CoachCoachee.objects.filter(coach=coach, coachee_id=coachee_id)
+        .select_related("coachee")
+        .first()
+    )
+    if not link:
+        return Response(
+            {"message": "Coachee not found for this coach.", "success": False},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    from forms.models import FormPage, FormPageSubmission
+
+    coachee = link.coachee
+    published_pages = FormPage.objects.filter(is_published=True).order_by(
+        "-published_at", "-updated_at"
+    )
+
+    submissions = (
+        FormPageSubmission.objects.filter(
+            submitted_by=coachee,
+            page__is_published=True,
+        )
+        .select_related("page")
+        .order_by("-submitted_at")
+    )
+
+    submission_by_page = {}
+    for submission in submissions:
+        if submission.page_id not in submission_by_page:
+            submission_by_page[submission.page_id] = submission
+
+    forms = []
+    for page in published_pages:
+        submission = submission_by_page.get(page.id)
+        forms.append(
+            {
+                "page_id": page.id,
+                "form_name": page.page_name,
+                "assignment_date": page.published_at,
+                "completion_status": "Completed" if submission else "Pending",
+                "completion_date": submission.submitted_at if submission else None,
+                "submission_id": submission.id if submission else None,
+            }
+        )
+
+    return Response(
+        {
+            "coachee": {
+                "coachee_id": coachee.id,
+                "user_name": coachee.user_name,
+                "email": coachee.get_decrypted_email(),
+            },
+            "forms": forms,
+            "count": len(forms),
+        }
+    )
 
 
 @api_view(["POST"])

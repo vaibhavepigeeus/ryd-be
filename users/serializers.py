@@ -159,13 +159,49 @@ class CoachCoacheeListSerializer(serializers.ModelSerializer):
     email = serializers.SerializerMethodField()
     status = serializers.CharField(source="coachee.status", read_only=True)
     linked_at = serializers.DateTimeField(source="created_at", read_only=True)
+    assigned_forms_count = serializers.SerializerMethodField()
+    completed_forms_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CoachCoachee
-        fields = ["coachee_id", "user_name", "email", "status", "linked_at"]
+        fields = [
+            "coachee_id",
+            "user_name",
+            "email",
+            "status",
+            "linked_at",
+            "assigned_forms_count",
+            "completed_forms_count",
+        ]
 
     def get_email(self, obj):
         return obj.coachee.get_decrypted_email()
+
+    def get_assigned_forms_count(self, obj):
+        assigned_count = self.context.get("assigned_forms_count")
+        if assigned_count is not None:
+            return assigned_count
+
+        from forms.models import FormPage
+
+        return FormPage.objects.filter(is_published=True).count()
+
+    def get_completed_forms_count(self, obj):
+        completed_counts = self.context.get("completed_counts")
+        if completed_counts is not None:
+            return completed_counts.get(obj.coachee_id, 0)
+
+        from forms.models import FormPageSubmission
+
+        return (
+            FormPageSubmission.objects.filter(
+                submitted_by_id=obj.coachee_id,
+                page__is_published=True,
+            )
+            .values("page_id")
+            .distinct()
+            .count()
+        )
 
 
 class CoachCreateCoacheeSerializer(serializers.Serializer):
