@@ -35,6 +35,7 @@ urlpatterns = [
     path('auth_check/', views.check_auth, name='check_auth'),
     path('my-coachees/link/', views.link_coachee, name='link_coachee'),
     path('my-coachees/update/', views.update_my_coachee, name='update_my_coachee'),
+    path('my-coachees/<int:coachee_id>/forms/', views.coachee_forms, name='coachee_forms'),
     path('my-coachees/', views.list_my_coachees, name='list_my_coachees'),
     path('coaches/', views.list_coaches, name='list_coaches'),
     path('my-coach/', views.my_coach, name='my_coach'),

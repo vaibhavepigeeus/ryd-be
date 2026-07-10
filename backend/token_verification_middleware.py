@@ -54,6 +54,8 @@ class TokenVerificationMiddleware:
             "/api/users/create-password/",
             "/api/users/oauth_login/",
             "/api/users/logout/",
+            "/admin/login/",
+            "/favicon.ico",
         ]
 
         self.get_response = get_response
